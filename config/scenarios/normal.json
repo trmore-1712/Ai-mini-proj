@@ -1,0 +1,10 @@
+{
+    "description": "Standard balanced traffic — normal spawn rates, no emergencies.",
+    "difficulty": "Easy",
+    "simulation": {
+        "spawn_rate_normal": 0.8,
+        "spawn_rate_peak":   2.5,
+        "emergency_probability": 0.003,
+        "accident_probability":  0.001
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "description": "Ambulance scenario — high emergency vehicle probability, tests override.",
+    "difficulty": "Medium",
+    "simulation": {
+        "spawn_rate_normal": 1.0,
+        "spawn_rate_peak":   2.0,
+        "emergency_probability": 0.05,
+        "accident_probability":  0.0
+    }
+}

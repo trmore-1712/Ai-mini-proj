@@ -1,0 +1,47 @@
+{
+    "simulation": {
+        "fps":                       60,
+        "time_scale":                1.0,
+        "spawn_rate_normal":         0.8,
+        "spawn_rate_peak":           2.5,
+        "emergency_probability":     0.003,
+        "accident_probability":      0.001,
+        "peak_hour_threshold":       20,
+        "peak_hour_window_seconds":  15
+    },
+
+    "signals": {
+        "default_green_duration":    30.0,
+        "yellow_duration":           3.0,
+        "min_green_duration":        10.0,
+        "max_green_duration":        60.0,
+        "max_starvation_cycles":     3
+    },
+
+    "ai": {
+        "decision_interval_ticks":   30,
+        "default_algorithm":         "astar",
+        "astar_depth_limit":         3,
+        "beam_width":                3,
+        "hill_climb_restarts":       3
+    },
+
+    "heuristic_weights": {
+        "wait_time":                 1.5,
+        "queue_length":              1.0,
+        "emergency":                 50.0,
+        "starvation":                2.0,
+        "throughput":                0.8,
+        "max_emergency_penalty":     500.0,
+        "max_starvation_penalty":    100.0
+    },
+
+    "renderer": {
+        "window_width":              1280,
+        "window_height":             720,
+        "road_color":                "#1A1A2E",
+        "lane_marking_color":        "#FFFFFF",
+        "hud_bg_color":              "#0D1117",
+        "hud_accent_color":          "#00D4FF"
+    }
+}

@@ -1,0 +1,11 @@
+{
+    "description": "Rush hour — 3× normal spawn rate triggering Beam Search.",
+    "difficulty": "Hard",
+    "simulation": {
+        "spawn_rate_normal": 2.5,
+        "spawn_rate_peak":   3.5,
+        "emergency_probability": 0.001,
+        "accident_probability":  0.0005,
+        "peak_hour_threshold":   10
+    }
+}

@@ -1,0 +1,10 @@
+{
+    "description": "Lane accident — one lane blocked, AI must re-route; tests AO* planning.",
+    "difficulty": "Medium",
+    "simulation": {
+        "spawn_rate_normal": 1.2,
+        "spawn_rate_peak":   2.0,
+        "emergency_probability": 0.002,
+        "accident_probability":  0.02
+    }
+}
