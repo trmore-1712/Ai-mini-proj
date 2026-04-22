@@ -77,13 +77,19 @@ class MinimaxAB:
 
         best_val    = float("inf")
         best_action = SignalAction.EXTEND_CURRENT_GREEN
-        alpha       = float("-inf")
-        beta        = float("inf")
+        # Standard alpha-beta convention:
+        #   alpha = best (highest cost) the MAX player (adversary) can guarantee = -inf
+        #   beta  = best (lowest  cost) the MIN player (controller) can guarantee = +inf
+        #   Prune when alpha >= beta.
+        alpha = float("-inf")
+        beta  = float("inf")
 
         for action in _ALL_ACTIONS:
             next_state, _ = _apply_action_to_clone(state, action, self.weights)
+            # Adversary (MAX) plays at depth-1 → is_maximising=False in our naming
+            # (is_maximising=False → adversary turn → maximize cost)
             val = self._minimax(next_state, self.depth - 1,
-                                is_maximising=False,   # env plays MIN at depth-1
+                                is_maximising=False,
                                 alpha=alpha, beta=beta)
             self.trace.append(
                 f"[Minimax] Action={action.value} → minimax_val={val:.1f}"
@@ -91,7 +97,10 @@ class MinimaxAB:
             if val < best_val:   # controller minimises cost
                 best_val    = val
                 best_action = action
-            alpha = min(alpha, val)   # alpha: best the MAX player has found so far
+            # Controller is MIN player → update beta
+            beta = min(beta, val)
+            if alpha >= beta:
+                break   # adversary can already force worse — prune
 
         self.trace.append(
             f"[Minimax] nodes_eval={self._nodes} | "
@@ -105,8 +114,14 @@ class MinimaxAB:
         """
         Recursive Minimax with α-β pruning.
 
-        is_maximising=False → MIN player (adversary) picks worst spawn
-        is_maximising=True  → MAX player (controller) picks best action
+        Naming convention (matches our problem framing):
+          is_maximising=True  → ADVERSARY turn — maximises heuristic cost
+          is_maximising=False → CONTROLLER turn — minimises heuristic cost
+
+        Alpha-Beta:
+          alpha = adversary (MAX) best guarantee  → starts -inf, updated by MAX
+          beta  = controller (MIN) best guarantee → starts +inf, updated by MIN
+          Prune when alpha >= beta.
         """
         self._nodes += 1
 
@@ -114,24 +129,28 @@ class MinimaxAB:
             return heuristic(state, self.weights)
 
         if is_maximising:
-            # Controller's turn: pick action minimising heuristic
-            best = float("inf")
-            for action in _ALL_ACTIONS:
-                next_s, _ = _apply_action_to_clone(state, action, self.weights)
-                val        = self._minimax(next_s, depth - 1, False, alpha, beta)
-                best       = min(best, val)
-                alpha      = min(alpha, best)
-                if alpha <= beta:
-                    break   # α-β prune
-            return best
-        else:
-            # Adversary's turn: pick spawn maximising heuristic
+            # Adversary's turn: pick spawn that MAXIMISES heuristic cost
             worst = float("-inf")
             for direction in _ADVERSARY_MOVES:
                 adv_state = _adversary_apply(state, direction)
-                val       = self._minimax(adv_state, depth - 1, True, alpha, beta)
-                worst     = max(worst, val)
-                beta      = max(beta, worst)
+                val       = self._minimax(adv_state, depth - 1,
+                                          is_maximising=False,   # controller plays next
+                                          alpha=alpha, beta=beta)
+                worst = max(worst, val)
+                alpha = max(alpha, worst)   # adversary (MAX) updates alpha
                 if alpha >= beta:
-                    break   # α-β prune
+                    break   # controller won't come here — prune
             return worst
+        else:
+            # Controller's turn: pick action that MINIMISES heuristic cost
+            best = float("inf")
+            for action in _ALL_ACTIONS:
+                next_s, _ = _apply_action_to_clone(state, action, self.weights)
+                val        = self._minimax(next_s, depth - 1,
+                                          is_maximising=True,    # adversary plays next
+                                          alpha=alpha, beta=beta)
+                best  = min(best, val)
+                beta  = min(beta, best)   # controller (MIN) updates beta
+                if alpha >= beta:
+                    break   # adversary already has better — prune
+            return best

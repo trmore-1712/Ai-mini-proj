@@ -37,7 +37,7 @@ def _font(size: int, bold: bool = False) -> pygame.font.Font:
     return _fonts[key]
 
 
-def draw_hud(surface: pygame.Surface, state: TrafficState, ai_trace: List[str], stats: dict, chart_surf: Optional[pygame.Surface] = None) -> None:
+def draw_hud(surface: pygame.Surface, state: TrafficState, ai_trace: List[str], stats: dict) -> None:
     """Render the dashboard UI."""
     pygame.draw.rect(surface, HUD_BG, (HUD_X, 0, HUD_W, SIM_H))
     pygame.draw.line(surface, PANEL_BORDER, (HUD_X, 0), (HUD_X, SIM_H), 1)
@@ -47,10 +47,6 @@ def draw_hud(surface: pygame.Surface, state: TrafficState, ai_trace: List[str], 
     y = _draw_signal_block(surface, state, y)
     y = _draw_lane_stats(surface, state, y)
     y = _draw_banners(surface, state, y)
-    y = _draw_trace_log(surface, ai_trace, y)
-
-    if chart_surf:
-        _draw_chart(surface, chart_surf, y)
 
 def draw_bottom_bar(surface: pygame.Surface, state: TrafficState, buttons: dict, speed: float, algo: str) -> None:
     """Minimal, light bottom control bar."""
@@ -134,41 +130,6 @@ def _draw_banners(surface: pygame.Surface, state: TrafficState, y: int) -> int:
     return y + max(banner_h, 0)
 
 
-def _draw_trace_log(surface: pygame.Surface, ai_trace: List[str], y: int) -> int:
-    _section_bg(surface, y, 205)
-    _blit(surface, "LIVE ALGORITHM TRACE", 12, TEXT_DIM, HUD_X + 20, y + 10, bold=True)
-    y += 30
-
-    lines = ai_trace[-10:]
-    for i, line in enumerate(lines):
-        alpha = int(255 * (0.4 + 0.6 * (i + 1) / len(lines))) if lines else 255
-        
-        col = TEXT_DIM
-        if "[A*]" in line: col = C_BLUE
-        elif "[Beam]" in line: col = C_AMBER
-        elif "EMERGENCY" in line: col = C_RED
-        elif "[AO*]" in line: col = C_PURPLE
-        elif "[Minimax]" in line: col = (237, 100, 166)
-        elif "[HillClimb]" in line: col = C_GREEN
-        elif "▶" in line: col = TEXT_MAIN
-
-        display = line[:56] if len(line) > 56 else line
-        
-        surf = _font(11, bold=("[" in display)).render(display, True, col)
-        surf.set_alpha(alpha)
-        surface.blit(surf, (HUD_X + 20, y + i * 16))
-
-    return y + len(lines) * 16 + 15
-
-def _draw_chart(surface: pygame.Surface, chart_surf: pygame.Surface, y: int) -> None:
-    rem = SIM_H - y - 15
-    if rem < 80: return
-    _section_bg(surface, y, rem)
-    _blit(surface, "SYSTEM EFFICIENCY", 12, TEXT_DIM, HUD_X + 20, y + 10, bold=True)
-    
-    chart_y = y + 30
-    chart_h = min(chart_surf.get_height(), rem - 40)
-    surface.blit(chart_surf, (HUD_X + 20, chart_y), (0, 0, HUD_W - 40, chart_h))
 
 # Utilities
 def _blit(surface, text, size, color, x, y, bold=False):

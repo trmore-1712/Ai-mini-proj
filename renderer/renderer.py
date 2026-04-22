@@ -39,8 +39,6 @@ class Renderer:
         self.screen   = pygame.display.set_mode((WIN_W, WIN_H))
         pygame.display.set_caption("Smart Traffic Simulation")
 
-        self._chart_surf:    Optional[pygame.Surface] = None
-        self._chart_timer:   float = 0.0
         self._debug_mode:    bool  = False
         self._show_scenario: bool  = False
         self._speed:         float = 1.0
@@ -77,14 +75,8 @@ class Renderer:
         if self._debug_mode:
             self._draw_debug(vp_surf, state)
 
-        # Plot update
-        self._chart_timer += dt
-        if self._chart_timer >= CHART_UPDATE_INTERVAL:
-            self._chart_surf  = self._render_chart(state)
-            self._chart_timer = 0.0
-
         # UI
-        draw_hud(self.screen, state, ai_trace, stats, self._chart_surf)
+        draw_hud(self.screen, state, ai_trace, stats)
         draw_bottom_bar(self.screen, state, {}, self._speed, self._algo)
         self._draw_buttons(state)
 
@@ -227,35 +219,4 @@ class Renderer:
     def set_algo(self, algo: str) -> None: self._algo = algo
     def toggle_debug(self) -> None: self._debug_mode = not self._debug_mode
 
-    def _render_chart(self, state: TrafficState) -> Optional[pygame.Surface]:
-        if len(state.time_history) < 2: return None
-        try:
-            import matplotlib
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-            import io
-            fig, ax = plt.subplots(figsize=(3.8, 1.6), dpi=80)
-            
-            # Friendly light mode colors
-            fig.patch.set_facecolor("#FFFFFF")
-            ax.set_facecolor("#F7FAFC")
-            t, ns, ew = state.time_history, state.wait_history_NS, state.wait_history_EW
 
-            ax.plot(t, ns, color="#4299E1", linewidth=1.5, label="NS wait")
-            ax.plot(t, ew, color="#F6AD55", linewidth=1.5, label="EW wait")
-            ax.fill_between(t, ns, alpha=0.1, color="#4299E1")
-            ax.fill_between(t, ew, alpha=0.1, color="#F6AD55")
-
-            ax.tick_params(colors="#718096", labelsize=7)
-            ax.spines[:].set_color("#E2E8F0")
-            ax.set_xlabel("Time (s)", color="#4A5568", fontsize=7)
-            ax.set_ylabel("Avg wait (s)", color="#4A5568", fontsize=7)
-            ax.legend(fontsize=7, facecolor="#FFFFFF", labelcolor="#2D3748", edgecolor="#E2E8F0")
-            plt.tight_layout(pad=0.3)
-            buf = io.BytesIO()
-            plt.savefig(buf, format="png", facecolor="#FFFFFF")
-            plt.close(fig)
-            buf.seek(0)
-            return pygame.image.load(buf, "chart.png")
-        except Exception:
-            return None

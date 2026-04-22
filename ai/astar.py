@@ -16,6 +16,13 @@ Depth limit = 3 steps → max nodes = 4^3 = 64 (fast enough for real-time at 30f
 Viva: A* guarantees optimality when h(n) is admissible — our heuristic is
       admissible (proved in PRD §12.3), so the first action of the returned
       path is the globally optimal signal decision.
+
+Look-ahead simulation constants:
+  _CLEAR_RATE      — vehicles cleared per step when a direction turns green.
+  _GREEN_WAIT_DROP — avg_wait relief (seconds) for the newly-green direction.
+  _RED_WAIT_GAIN   — avg_wait increase (seconds) for the newly-red direction.
+These mirror realistic intersection throughput so algorithms correctly weigh
+SWITCH vs EXTEND rather than blindly preferring one action.
 """
 
 import heapq
@@ -24,12 +31,20 @@ from typing import List, Optional, Tuple
 from core.state import TrafficState, SignalAction, SignalPhase, Direction
 from ai.heuristic import heuristic
 
-# All possible actions the AI can evaluate
+# Default actions (unused directly now, filtered dynamically)
 _ALL_ACTIONS = [
     SignalAction.EXTEND_CURRENT_GREEN,
     SignalAction.SWITCH_SIGNAL,
     SignalAction.SHORTEN_CURRENT_GREEN,
 ]
+
+
+# ── Look-ahead simulation constants ──────────────────────────────────────────
+# These govern how action effects are modelled in the cloned state.
+# Tuned to approximate real intersection throughput at ~30 fps / 1-tick AI step.
+_CLEAR_RATE      = 3     # vehicles cleared per step when direction turns green
+_GREEN_WAIT_DROP = 8.0   # seconds of wait-time relief for the newly-green side
+_RED_WAIT_GAIN   = 8.0   # seconds of extra wait accumulated on the newly-red side
 
 
 def _apply_action_to_clone(state: TrafficState, action: SignalAction,
@@ -38,42 +53,79 @@ def _apply_action_to_clone(state: TrafficState, action: SignalAction,
     Create a cloned state and simulate the effect of `action` on it.
     Returns the new state and the cost of taking this action (g increment).
 
-    This is a lightweight 'rollout' — we don't re-run the full simulation,
-    just adjust the state fields that the action would change.
+    Key fix (v2): SWITCH now also models vehicle *clearance* for the direction
+    that just received green.  Without this, all algorithms saw EXTEND as
+    cheaper than SWITCH because the newly-green side never benefited — causing
+    the EW direction to starve indefinitely.
     """
     s = state.clone()
     cost = 0.0
 
     if action == SignalAction.SWITCH_SIGNAL:
-        # Simulate phase flip: waiting vehicles accumulate more wait
         if s.current_phase == SignalPhase.NS_GREEN:
             s.current_phase = SignalPhase.EW_GREEN
-            # NS vehicles continue waiting during EW phase
+            # NS goes red: wait accumulates on the now-red side
             for d in (Direction.NORTH, Direction.SOUTH):
-                s.lanes[d].avg_wait_time += 10.0
+                s.lanes[d].avg_wait_time += _RED_WAIT_GAIN
+            # EW gets green: vehicles start clearing
+            for d in (Direction.EAST, Direction.WEST):
+                cleared = min(_CLEAR_RATE, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - _GREEN_WAIT_DROP)
+                s.lanes[d].throughput    += cleared
         else:
             s.current_phase = SignalPhase.NS_GREEN
+            # EW goes red
             for d in (Direction.EAST, Direction.WEST):
-                s.lanes[d].avg_wait_time += 10.0
-        cost = 3.0   # yellow transition cost
+                s.lanes[d].avg_wait_time += _RED_WAIT_GAIN
+            # NS gets green: vehicles start clearing
+            for d in (Direction.NORTH, Direction.SOUTH):
+                cleared = min(_CLEAR_RATE, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - _GREEN_WAIT_DROP)
+                s.lanes[d].throughput    += cleared
+        cost = 3.0   # yellow transition penalty
 
     elif action == SignalAction.EXTEND_CURRENT_GREEN:
-        # Current GREEN direction gets more throughput; other side waits longer
+        # Current green direction clears more vehicles; red side waits longer
         s.phase_timer += 10.0
         if s.current_phase == SignalPhase.NS_GREEN:
-            s.lanes[Direction.NORTH].avg_wait_time = max(0, s.lanes[Direction.NORTH].avg_wait_time - 5)
-            s.lanes[Direction.SOUTH].avg_wait_time = max(0, s.lanes[Direction.SOUTH].avg_wait_time - 5)
-            s.lanes[Direction.EAST].avg_wait_time  += 5.0
-            s.lanes[Direction.WEST].avg_wait_time  += 5.0
+            for d in (Direction.NORTH, Direction.SOUTH):
+                cleared = min(_CLEAR_RATE, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - 5.0)
+                s.lanes[d].throughput    += cleared
+            for d in (Direction.EAST, Direction.WEST):
+                s.lanes[d].avg_wait_time += 5.0
         else:
-            s.lanes[Direction.EAST].avg_wait_time  = max(0, s.lanes[Direction.EAST].avg_wait_time - 5)
-            s.lanes[Direction.WEST].avg_wait_time  = max(0, s.lanes[Direction.WEST].avg_wait_time - 5)
-            s.lanes[Direction.NORTH].avg_wait_time += 5.0
-            s.lanes[Direction.SOUTH].avg_wait_time += 5.0
+            for d in (Direction.EAST, Direction.WEST):
+                cleared = min(_CLEAR_RATE, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - 5.0)
+                s.lanes[d].throughput    += cleared
+            for d in (Direction.NORTH, Direction.SOUTH):
+                s.lanes[d].avg_wait_time += 5.0
         cost = 1.0
 
     elif action == SignalAction.SHORTEN_CURRENT_GREEN:
-        s.phase_timer = max(s.phase_timer - 5.0, 5.0)
+        # Shorten: modest clearance for current direction, red side STILL waits
+        s.phase_timer = max(s.phase_timer - 5.0, 0.0)
+        if s.current_phase == SignalPhase.NS_GREEN:
+            for d in (Direction.NORTH, Direction.SOUTH):
+                cleared = min(1, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - 2.0)
+                s.lanes[d].throughput    += cleared
+            for d in (Direction.EAST, Direction.WEST):
+                s.lanes[d].avg_wait_time += 2.0
+        else:
+            for d in (Direction.EAST, Direction.WEST):
+                cleared = min(1, s.lanes[d].vehicle_count)
+                s.lanes[d].vehicle_count  = max(0, s.lanes[d].vehicle_count - cleared)
+                s.lanes[d].avg_wait_time  = max(0.0, s.lanes[d].avg_wait_time - 2.0)
+                s.lanes[d].throughput    += cleared
+            for d in (Direction.NORTH, Direction.SOUTH):
+                s.lanes[d].avg_wait_time += 2.0
         cost = 0.5
 
     return s, cost
@@ -89,8 +141,18 @@ class AStarSearch:
 
     def __init__(self, config: dict, weights: dict):
         self.depth_limit = config.get("astar_depth_limit", 3)
+        # Using fallback for max resilience, extracting min_green from settings
+        self.min_green   = config.get("signals", {}).get("min_green_duration", 15.0) if "signals" in config else 15.0
         self.weights     = weights
         self.trace:      List[str] = []
+
+    def _get_valid_actions(self, state: TrafficState) -> List[SignalAction]:
+        actions = [SignalAction.EXTEND_CURRENT_GREEN]
+        # Only allow SWITCH or SHORTEN if minimum green time has elapsed to stop AI flickering
+        if getattr(state, "current_green_time", 0.0) >= self.min_green or getattr(state, "emergency_NS", False) or getattr(state, "emergency_EW", False):
+            actions.append(SignalAction.SWITCH_SIGNAL)
+            actions.append(SignalAction.SHORTEN_CURRENT_GREEN)
+        return actions
 
     def decide(self, state: TrafficState) -> SignalAction:
         """
@@ -130,7 +192,8 @@ class AStarSearch:
                 continue
 
             # Expand each possible action
-            for action in _ALL_ACTIONS:
+            valid_actions = self._get_valid_actions(cur_state)
+            for action in valid_actions:
                 next_state, delta_g = _apply_action_to_clone(cur_state, action, self.weights)
                 new_g = g + delta_g
                 new_h = heuristic(next_state, self.weights)

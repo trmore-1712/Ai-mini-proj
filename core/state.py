@@ -102,6 +102,7 @@ class TrafficState:
     algorithm_used:     str   = "A*"
     last_decision_cost: float = 0.0
     paused:             bool  = False
+    current_green_time: float = 0.0    # tracked in controller to enforce min_green
 
     # Starvation tracking at the phase level
     cycles_since_green_NS: int = 0
@@ -198,5 +199,6 @@ class TrafficState:
             cycles_since_green_NS=self.cycles_since_green_NS,
             cycles_since_green_EW=self.cycles_since_green_EW,
             total_cleared=self.total_cleared,
+            current_green_time=self.current_green_time,
         )
         return new

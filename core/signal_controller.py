@@ -28,9 +28,17 @@ class SignalController:
         self.min_green      = config.get("min_green_duration",     10.0)
         self.max_green      = config.get("max_green_duration",     60.0)
         self.max_starvation = config.get("max_starvation_cycles",   3)
+        self.max_wait_time  = config.get("max_wait_time",          60.0)
 
         # Which phase follows yellow after a switch
         self._next_phase_after_yellow: SignalPhase = SignalPhase.EW_GREEN
+
+        # Time-based starvation prevention (tracks continuous RED seconds per
+        # direction).  Resets to 0.0 the moment a direction receives green.
+        # Used by _check_time_starvation() to guarantee switching even when
+        # the AI keeps sending EXTEND_CURRENT_GREEN indefinitely.
+        self._red_elapsed_NS: float = 0.0
+        self._red_elapsed_EW: float = 0.0
 
     # ------------------------------------------------------------------
     # Tick update
@@ -50,6 +58,11 @@ class SignalController:
                 state.current_phase = self._next_phase_after_yellow
                 state.phase_timer   = self.default_green
                 state.yellow_timer  = 0.0
+                # Reset the red-elapsed counter for the direction that just got green
+                if state.current_phase == SignalPhase.NS_GREEN:
+                    self._red_elapsed_NS = 0.0
+                elif state.current_phase == SignalPhase.EW_GREEN:
+                    self._red_elapsed_EW = 0.0
                 self._on_phase_start(state)
             return
 
@@ -57,13 +70,28 @@ class SignalController:
         if state.current_phase == SignalPhase.EMERGENCY_OVERRIDE:
             return
 
+        # Track real elapsed red time per direction ─────────────────────────
+        # This is the backing for _check_time_starvation() below.
+        if state.current_phase == SignalPhase.NS_GREEN:
+            self._red_elapsed_EW += dt
+            self._red_elapsed_NS  = 0.0
+        elif state.current_phase == SignalPhase.EW_GREEN:
+            self._red_elapsed_NS += dt
+            self._red_elapsed_EW  = 0.0
+
+        # Track real elapsed green time
+        if state.current_phase in (SignalPhase.NS_GREEN, SignalPhase.EW_GREEN):
+            state.current_green_time += dt
+
         # Normal countdown
         state.phase_timer -= dt
         if state.phase_timer <= 0:
             self._begin_switch(state)
 
-        # Fairness / starvation enforcement
+        # Cycle-based starvation enforcement
         self._check_starvation(state)
+        # Time-based starvation enforcement (catches AI-induced starvation)
+        self._check_time_starvation(state)
 
     def apply_action(self, action: SignalAction, state: TrafficState) -> None:
         """
@@ -78,13 +106,15 @@ class SignalController:
         if action == SignalAction.SWITCH_SIGNAL:
             if state.current_phase not in (SignalPhase.YELLOW,
                                            SignalPhase.EMERGENCY_OVERRIDE):
-                self._begin_switch(state)
+                if state.current_green_time >= self.min_green or state.phase_timer <= 0:
+                    self._begin_switch(state)
 
         elif action == SignalAction.EXTEND_CURRENT_GREEN:
             state.phase_timer = min(state.phase_timer + 10.0, self.max_green)
 
         elif action == SignalAction.SHORTEN_CURRENT_GREEN:
-            state.phase_timer = max(state.phase_timer - 5.0, self.min_green)
+            if state.current_green_time >= self.min_green:
+                state.phase_timer = max(state.phase_timer - 5.0, 0.0)
 
         elif action == SignalAction.EMERGENCY_OVERRIDE:
             # Determine which phase gives green to the emergency direction
@@ -112,10 +142,12 @@ class SignalController:
             self._next_phase_after_yellow = SignalPhase.EW_GREEN
             state.cycles_since_green_NS   = 0        # NS just had its green
             state.cycles_since_green_EW  += 1
+            self._red_elapsed_EW          = 0.0      # EW is about to get green
         elif state.current_phase == SignalPhase.EW_GREEN:
             self._next_phase_after_yellow = SignalPhase.NS_GREEN
             state.cycles_since_green_EW   = 0
             state.cycles_since_green_NS  += 1
+            self._red_elapsed_NS          = 0.0      # NS is about to get green
             state.cycle_count            += 1        # full cycle complete
 
         # Reset throughput counters for the outgoing phase
@@ -125,6 +157,7 @@ class SignalController:
         state.current_phase = SignalPhase.YELLOW
         state.yellow_timer  = self.yellow_dur
         state.phase_timer   = 0.0
+        state.current_green_time = 0.0
         bus.publish(EVT_SIGNAL_SWITCHED, SignalPhase.YELLOW)
 
     def _on_phase_start(self, state: TrafficState) -> None:
@@ -135,11 +168,30 @@ class SignalController:
         """
         Force a phase switch if one direction has been starved of green
         for more than max_starvation_cycles consecutive cycles.
-        This implements Feature 5 (Starvation Prevention).
+        This implements Feature 5 (Starvation Prevention) — cycle-based check.
         """
         if (state.cycles_since_green_EW >= self.max_starvation and
                 state.current_phase == SignalPhase.NS_GREEN):
             self._begin_switch(state)
         elif (state.cycles_since_green_NS >= self.max_starvation and
               state.current_phase == SignalPhase.EW_GREEN):
+            self._begin_switch(state)
+
+    def _check_time_starvation(self, state: TrafficState) -> None:
+        """
+        Force a phase switch if a direction has been continuously RED for
+        more than max_wait_time seconds, regardless of cycle count.
+
+        This is the critical safety net that prevents AI-induced starvation:
+        when the algorithm keeps choosing EXTEND_CURRENT_GREEN, _begin_switch
+        is never called, cycles_since_green_EW never increments, and the
+        cycle-based check above never fires.  This time-based check catches
+        that case and guarantees both directions receive green within
+        max_wait_time seconds.
+        """
+        if (state.current_phase == SignalPhase.NS_GREEN and
+                self._red_elapsed_EW >= self.max_wait_time):
+            self._begin_switch(state)
+        elif (state.current_phase == SignalPhase.EW_GREEN and
+              self._red_elapsed_NS >= self.max_wait_time):
             self._begin_switch(state)

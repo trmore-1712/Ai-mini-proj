@@ -11,11 +11,12 @@
     },
 
     "signals": {
-        "default_green_duration":    30.0,
+        "default_green_duration":    40.0,
         "yellow_duration":           3.0,
-        "min_green_duration":        10.0,
-        "max_green_duration":        60.0,
-        "max_starvation_cycles":     3
+        "min_green_duration":        15.0,
+        "max_green_duration":        90.0,
+        "max_starvation_cycles":     3,
+        "max_wait_time":             60.0
     },
 
     "ai": {

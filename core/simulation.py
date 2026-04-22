@@ -272,18 +272,13 @@ class SimulationEngine:
             color = _AMBU_COLOR
             speed = 3.5
         else:
-            vtype = random.choice(_VEHICLE_TYPES)
-            if vtype == "bus":
-                color, speed = _BUS_COLOR, 1.6
-            elif vtype == "truck":
-                color, speed = _TRUCK_COLOR, 1.4
-            else:  # car
-                color = random.choice(_CAR_COLORS)
-                speed = random.uniform(2.0, 3.0)
+            vtype = "car"  # Enforce uniform shape
+            color = (52, 152, 219) # Uniform blue color
+            speed = random.uniform(2.0, 3.0)
 
         start, stop, exit_ = _lane_geometry(direction)
 
-        # Stagger spawn position within lane (avoid perfect overlap)
+        # Stagger spawn position within lane
         offset = random.randint(0, 20)
         if direction == Direction.NORTH:
             start = (start[0], start[1] - offset)
